@@ -202,9 +202,9 @@ func (p *Player) renderUI() {
 		pauseLabel = "  [PAUSED]"
 	}
 
-	fmt.Printf("\r\033[K\033[2m  \"%s\"\033[0m\r\n", prev)
-	fmt.Printf("\r\033[K  \"%s\"\r\n", curr)
-	fmt.Printf("\r\033[K\033[2m  \"%s\"\033[0m\r\n", next)
+	fmt.Printf("\r\033[K\033[2m  %s\033[0m\r\n", prev)
+	fmt.Printf("\r\033[K  %s\r\n", curr)
+	fmt.Printf("\r\033[K\033[2m  %s\033[0m\r\n", next)
 	fmt.Printf("\r\033[K\r\n")
 	fmt.Printf("\r\033[K  [%s] %d%% (%d/%d)%s\r\n", bar, pct, current, total, pauseLabel)
 	fmt.Printf("\r\033[K\r\n")

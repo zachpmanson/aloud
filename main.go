@@ -13,7 +13,7 @@ import (
 	"golang.org/x/term"
 )
 
-var splitRe = regexp.MustCompile(`[.!?]["'\)]?[\n ]`)
+var splitRe = regexp.MustCompile(`[^.][^A-Z][.!?]["'\)]?[\n ]`)
 
 var asciiNormalizer = strings.NewReplacer(
 	"\u201C", `"`, // left double quotation mark
