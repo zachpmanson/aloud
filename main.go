@@ -1,0 +1,147 @@
+package main
+
+import (
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"os/signal"
+	"regexp"
+	"strings"
+	"syscall"
+
+	"golang.org/x/term"
+)
+
+var splitRe = regexp.MustCompile(`[.!?]["'\)]?[\n ]`)
+
+var asciiNormalizer = strings.NewReplacer(
+	"\u201C", `"`, // left double quotation mark
+	"\u201D", `"`, // right double quotation mark
+	"\u2018", "'", // left single quotation mark
+	"\u2019", "'", // right single quotation mark
+	"\u2014", "--", // em dash
+	"\u2013", "-", // en dash
+	"\u2026", "...", // horizontal ellipsis
+	"\u00A0", " ", // non-breaking space
+)
+
+func normalizeASCII(s string) string { return asciiNormalizer.Replace(s) }
+
+// pronunciations maps words/phrases that `say` mispronounces to better
+// alternatives. Replacements are applied to the spoken text only; the
+// original text is still shown in the progress bar.
+var pronunciations = map[string]string{
+	// Add entries here, e.g.:
+	"\n":     "[[slnc 3500]]",
+	"OpenAI": "Open A.I.",
+	"AGI":    "A.G.I.",
+}
+
+func applyPronunciations(s string) string {
+	pairs := make([]string, 0, len(pronunciations)*2)
+	for from, to := range pronunciations {
+		pairs = append(pairs, from, to)
+	}
+	return strings.NewReplacer(pairs...).Replace(s)
+}
+
+func splitSentences(text string) []string {
+	locs := splitRe.FindAllStringIndex(text, -1)
+	if len(locs) == 0 {
+		if s := strings.TrimSpace(text); s != "" {
+			return []string{s}
+		}
+		return nil
+	}
+
+	var result []string
+	pos := 0
+	for _, loc := range locs {
+		if s := strings.TrimSpace(text[pos:loc[1]]); s != "" {
+			result = append(result, s)
+		}
+		pos = loc[1]
+	}
+	if s := strings.TrimSpace(text[pos:]); s != "" {
+		result = append(result, s)
+	}
+	return result
+}
+
+func main() {
+	atPct := flag.Int("at", 0, "start playback at `percent` (0–100)")
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: aloud [--at <percent>] <file>\n       echo \"text\" | aloud [--at <percent>]\n")
+	}
+	flag.Parse()
+
+	if *atPct < 0 || *atPct > 100 {
+		fmt.Fprintf(os.Stderr, "aloud: --at must be between 0 and 100\n")
+		os.Exit(1)
+	}
+
+	var input string
+
+	switch {
+	case flag.NArg() == 1:
+		data, err := os.ReadFile(flag.Arg(0))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "aloud: cannot read file: %v\n", err)
+			os.Exit(1)
+		}
+		input = string(data)
+	case !term.IsTerminal(int(os.Stdin.Fd())):
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "aloud: cannot read stdin: %v\n", err)
+			os.Exit(1)
+		}
+		input = string(data)
+	default:
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	sentences := splitSentences(normalizeASCII(input))
+	if len(sentences) == 0 {
+		fmt.Fprintln(os.Stderr, "aloud: no text found")
+		os.Exit(1)
+	}
+
+	tty, err := os.Open("/dev/tty")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "aloud: cannot open /dev/tty: %v\n", err)
+		os.Exit(1)
+	}
+	defer tty.Close()
+
+	oldState, err := term.MakeRaw(int(tty.Fd()))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "aloud: cannot set raw terminal: %v\n", err)
+		os.Exit(1)
+	}
+
+	restore := func() {
+		term.Restore(int(tty.Fd()), oldState) //nolint:errcheck
+	}
+	defer restore()
+
+	// Restore terminal on external signals.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		restore()
+		os.Exit(0)
+	}()
+
+	p := NewPlayer(sentences, tty)
+	p.index = *atPct * len(sentences) / 100
+	startMediaKeyMonitor(p.cmdCh)
+	go p.keyboardLoop()
+	p.Run()
+
+	// Move past the UI block cleanly.
+	fmt.Print("\n")
+}
