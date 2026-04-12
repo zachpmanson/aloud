@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 	"syscall"
+	"time"
 
 	"golang.org/x/term"
 )
@@ -77,9 +78,18 @@ func (p *Player) Run() {
 			close(doneCh)
 		}(p.cmd)
 
+		expectedSecs := p.wordCounts[p.index] * 60 / WPM
+		timeout := time.Duration(max(expectedSecs*3, 10)) * time.Second
+
 	outer:
 		for {
 			select {
+			case <-time.After(timeout):
+				p.cmd.Process.Kill() //nolint:errcheck
+				<-doneCh
+				p.index++
+				break outer
+
 			case <-doneCh:
 				if !p.paused {
 					p.index++
