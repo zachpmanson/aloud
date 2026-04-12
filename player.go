@@ -173,9 +173,9 @@ func (p *Player) keyboardLoop() {
 		case bytes.Equal(key, []byte{27, 91, 68}): // left arrow
 			p.cmdCh <- CmdPrev
 		case bytes.Equal(key, []byte{27, 91, 65}): // up arrow
-			p.cmdCh <- CmdNext
-		case bytes.Equal(key, []byte{27, 91, 66}): // down arrow
 			p.cmdCh <- CmdPrev
+		case bytes.Equal(key, []byte{27, 91, 66}): // down arrow
+			p.cmdCh <- CmdNext
 
 		case len(key) == 1 && key[0] >= '0' && key[0] <= '9':
 			p.cmdCh <- CmdSeek + Command(key[0]-'0')
