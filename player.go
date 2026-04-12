@@ -26,20 +26,33 @@ const (
 
 // Player manages TTS playback and terminal UI.
 type Player struct {
-	sentences []string
-	index     int
-	paused    bool
-	cmd       *exec.Cmd
-	cmdCh     chan Command
-	tty       *os.File
-	rendered  bool
+	sentences  []string
+	wordCounts []int
+	totalWords int
+	index      int
+	paused     bool
+	cmd        *exec.Cmd
+	cmdCh      chan Command
+	tty        *os.File
+	rendered   bool
+	wpm        int
 }
 
-func NewPlayer(sentences []string, tty *os.File) *Player {
+func NewPlayer(sentences []string, tty *os.File, wpm int) *Player {
+	wordCounts := make([]int, len(sentences))
+	total := 0
+	for i, s := range sentences {
+		n := len(strings.Fields(s))
+		wordCounts[i] = n
+		total += n
+	}
 	return &Player{
-		sentences: sentences,
-		cmdCh:     make(chan Command, 4),
-		tty:       tty,
+		sentences:  sentences,
+		wordCounts: wordCounts,
+		totalWords: total,
+		cmdCh:      make(chan Command, 4),
+		tty:        tty,
+		wpm:        wpm,
 	}
 }
 
@@ -202,11 +215,25 @@ func (p *Player) renderUI() {
 		pauseLabel = "  [PAUSED]"
 	}
 
+	wordsRemaining := 0
+	for i := p.index; i < len(p.sentences); i++ {
+		wordsRemaining += p.wordCounts[i]
+	}
+	timeLabel := ""
+	if p.wpm > 0 {
+		secsRemaining := wordsRemaining * 60 / p.wpm
+		if secsRemaining >= 60 {
+			timeLabel = fmt.Sprintf("  ~%dm%ds left", secsRemaining/60, secsRemaining%60)
+		} else {
+			timeLabel = fmt.Sprintf("  ~%ds left", secsRemaining)
+		}
+	}
+
 	fmt.Printf("\r\033[K\033[2m  %s\033[0m\r\n", prev)
 	fmt.Printf("\r\033[K  %s\r\n", curr)
 	fmt.Printf("\r\033[K\033[2m  %s\033[0m\r\n", next)
 	fmt.Printf("\r\033[K\r\n")
-	fmt.Printf("\r\033[K  [%s] %d%% (%d/%d)%s\r\n", bar, pct, current, total, pauseLabel)
+	fmt.Printf("\r\033[K  [%s] %d%% (%d/%d)%s%s\r\n", bar, pct, current, total, timeLabel, pauseLabel)
 	fmt.Printf("\r\033[K\r\n")
 	fmt.Printf("\r\033[K  ← prev  [space] pause/resume  → next  q quit")
 

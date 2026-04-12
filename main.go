@@ -36,6 +36,8 @@ var pronunciations = map[string]string{
 	"\n":     "[[slnc 3500]]",
 	"OpenAI": "Open A.I.",
 	"AGI":    "A.G.I.",
+	"VRAM":   "vee ram",
+	"RAM":    "ram",
 }
 
 func applyPronunciations(s string) string {
@@ -136,7 +138,8 @@ func main() {
 		os.Exit(0)
 	}()
 
-	p := NewPlayer(sentences, tty)
+	wpm := 160
+	p := NewPlayer(sentences, tty, wpm)
 	p.index = *atPct * len(sentences) / 100
 	startMediaKeyMonitor(p.cmdCh)
 	go p.keyboardLoop()
