@@ -71,18 +71,22 @@ func splitSentences(text string) []string {
 	return result
 }
 
-func main() {
-	atPct := flag.Int("at", 0, "start playback at `percent` (0–100)")
+func getAt() *int {
+	atPct := flag.Int("at", 0, "start playback at `percent` (0-100)")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: aloud [--at <percent>] <file>\n       echo \"text\" | aloud [--at <percent>]\n")
+		fmt.Fprintln(os.Stderr, "Usage: aloud [--at <percent>] <file>\n       echo \"text\" | aloud [--at <percent>]")
 	}
 	flag.Parse()
 
 	if *atPct < 0 || *atPct > 100 {
-		fmt.Fprintf(os.Stderr, "aloud: --at must be between 0 and 100\n")
+		fmt.Fprintln(os.Stderr, "aloud: --at must be between 0 and 100")
 		os.Exit(1)
 	}
+	return atPct
 
+}
+
+func getText() string {
 	var input string
 
 	switch {
@@ -104,28 +108,35 @@ func main() {
 		flag.Usage()
 		os.Exit(1)
 	}
+	return input
+}
 
-	sentences := splitSentences(normalizeASCII(input))
+func maybeCrash(err error, msg string) {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "aloud: %s: %v\n", msg, err)
+		os.Exit(1)
+	}
+}
+
+func main() {
+	atPct := getAt()
+	input := normalizeASCII(getText())
+	sentences := splitSentences((input))
+
 	if len(sentences) == 0 {
 		fmt.Fprintln(os.Stderr, "aloud: no text found")
 		os.Exit(1)
 	}
 
 	tty, err := os.Open("/dev/tty")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "aloud: cannot open /dev/tty: %v\n", err)
-		os.Exit(1)
-	}
+	maybeCrash(err, "cannot open /dev/tty")
 	defer tty.Close()
 
 	oldState, err := term.MakeRaw(int(tty.Fd()))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "aloud: cannot set raw terminal: %v\n", err)
-		os.Exit(1)
-	}
+	maybeCrash(err, "cannot set raw terminal")
 
 	restore := func() {
-		term.Restore(int(tty.Fd()), oldState) //nolint:errcheck
+		term.Restore(int(tty.Fd()), oldState)
 	}
 	defer restore()
 
@@ -138,8 +149,7 @@ func main() {
 		os.Exit(0)
 	}()
 
-	wpm := 160
-	p := NewPlayer(sentences, tty, wpm)
+	p := NewPlayer(sentences, tty)
 	p.index = *atPct * len(sentences) / 100
 	startMediaKeyMonitor(p.cmdCh)
 	go p.keyboardLoop()

@@ -35,10 +35,11 @@ type Player struct {
 	cmdCh      chan Command
 	tty        *os.File
 	rendered   bool
-	wpm        int
 }
 
-func NewPlayer(sentences []string, tty *os.File, wpm int) *Player {
+var WPM int = 160
+
+func NewPlayer(sentences []string, tty *os.File) *Player {
 	wordCounts := make([]int, len(sentences))
 	total := 0
 	for i, s := range sentences {
@@ -52,7 +53,6 @@ func NewPlayer(sentences []string, tty *os.File, wpm int) *Player {
 		totalWords: total,
 		cmdCh:      make(chan Command, 4),
 		tty:        tty,
-		wpm:        wpm,
 	}
 }
 
@@ -208,16 +208,13 @@ func (p *Player) renderUI() {
 	// }
 
 	// Reserve 4 chars for the leading `  "` and trailing `"`.
-	maxWidth := max((termWidth - 4), 10)
+	maxWidth := max(termWidth-4, 10)
 
 	context := p.contextSentences(maxWidth)
 
 	total := len(p.sentences)
 	current := p.index + 1
-	filled := barWidth * current / total
-	if filled > barWidth {
-		filled = barWidth
-	}
+	filled := min(barWidth, barWidth*current/total)
 	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
 	pct := 100 * current / total
 
@@ -231,13 +228,12 @@ func (p *Player) renderUI() {
 		wordsRemaining += p.wordCounts[i]
 	}
 	timeLabel := ""
-	if p.wpm > 0 {
-		secsRemaining := wordsRemaining * 60 / p.wpm
-		if secsRemaining >= 60 {
-			timeLabel = fmt.Sprintf("  ~%dm%ds left", secsRemaining/60, secsRemaining%60)
-		} else {
-			timeLabel = fmt.Sprintf("  ~%ds left", secsRemaining)
-		}
+
+	secsRemaining := wordsRemaining * 60 / WPM
+	if secsRemaining >= 60 {
+		timeLabel = fmt.Sprintf("  ~%dm%ds left", secsRemaining/60, secsRemaining%60)
+	} else {
+		timeLabel = fmt.Sprintf("  ~%ds left", secsRemaining)
 	}
 
 	for i, line := range context {
