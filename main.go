@@ -38,6 +38,7 @@ var pronunciations = map[string]string{
 	"AGI":    "A.G.I.",
 	"VRAM":   "vee ram",
 	"RAM":    "ram",
+	"KPI":    "K.P.I.",
 }
 
 func applyPronunciations(s string) string {
