@@ -64,7 +64,9 @@ func (p *Player) Run() {
 	}
 
 	for p.index < len(p.sentences) {
-		p.cmd = exec.Command("say", applyPronunciations(p.sentences[p.index])+" [[slnc 400]]")
+		p.cmd = exec.Command("say", "-r",
+			fmt.Sprintf("%d", WPM),
+			applyPronunciations(p.sentences[p.index])+" [[slnc 400]]")
 		if err := p.cmd.Start(); err != nil {
 			// If say fails, skip to next sentence.
 			p.index++
@@ -79,18 +81,20 @@ func (p *Player) Run() {
 		}(p.cmd)
 
 		expectedSecs := p.wordCounts[p.index] * 60 / WPM
-		timeout := time.Duration(max(expectedSecs*3, 10)) * time.Second
+		timeout := time.Duration(max(expectedSecs*2, 10)) * time.Second
+		hangTimer := time.NewTimer(timeout)
 
 	outer:
 		for {
 			select {
-			case <-time.After(timeout):
+			case <-hangTimer.C:
 				p.cmd.Process.Kill() //nolint:errcheck
 				<-doneCh
 				p.index++
 				break outer
 
 			case <-doneCh:
+				hangTimer.Stop()
 				if !p.paused {
 					p.index++
 				}
@@ -102,6 +106,7 @@ func (p *Player) Run() {
 			case c := <-p.cmdCh:
 				switch c {
 				case CmdQuit:
+					hangTimer.Stop()
 					p.cmd.Process.Kill() //nolint:errcheck
 					<-doneCh
 					p.clearUI()
@@ -109,15 +114,18 @@ func (p *Player) Run() {
 
 				case CmdPause:
 					if !p.paused {
+						hangTimer.Stop()
 						p.cmd.Process.Signal(syscall.SIGSTOP) //nolint:errcheck
 						p.paused = true
 					} else {
+						hangTimer.Reset(timeout)
 						p.cmd.Process.Signal(syscall.SIGCONT) //nolint:errcheck
 						p.paused = false
 					}
 					p.renderUI()
 
 				case CmdNext:
+					hangTimer.Stop()
 					if p.paused {
 						p.cmd.Process.Signal(syscall.SIGCONT) //nolint:errcheck
 						p.paused = false
@@ -130,6 +138,7 @@ func (p *Player) Run() {
 					break outer
 
 				case CmdPrev:
+					hangTimer.Stop()
 					if p.paused {
 						p.cmd.Process.Signal(syscall.SIGCONT) //nolint:errcheck
 						p.paused = false
@@ -143,6 +152,7 @@ func (p *Player) Run() {
 
 				default:
 					if c >= CmdSeek {
+						hangTimer.Stop()
 						digit := int(c - CmdSeek) // 0–9
 						if p.paused {
 							p.cmd.Process.Signal(syscall.SIGCONT) //nolint:errcheck
