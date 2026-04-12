@@ -168,6 +168,11 @@ func (p *Player) keyboardLoop() {
 			p.cmdCh <- CmdNext
 		case bytes.Equal(key, []byte{27, 91, 68}): // left arrow
 			p.cmdCh <- CmdPrev
+		case bytes.Equal(key, []byte{27, 91, 65}): // up arrow
+			p.cmdCh <- CmdNext
+		case bytes.Equal(key, []byte{27, 91, 66}): // down arrow
+			p.cmdCh <- CmdPrev
+
 		case len(key) == 1 && key[0] >= '0' && key[0] <= '9':
 			p.cmdCh <- CmdSeek + Command(key[0]-'0')
 		}
@@ -176,13 +181,18 @@ func (p *Player) keyboardLoop() {
 
 const barWidth = 36
 
-// renderUI draws (or redraws) the 7-line status block to stdout.
+// contextLines controls how many sentences before and after the current one
+// are shown in the UI. Total sentence rows = 2*contextLines + 1.
+const contextLines = 2
+
+// renderUI draws (or redraws) the status block to stdout.
+// Total lines = 2*contextLines+1 (sentences) + 4 (blank, bar, blank, controls).
 func (p *Player) renderUI() {
 	if p.rendered {
-		// Move cursor up 6 lines to overwrite. The controls line has no
-		// trailing newline, so the cursor sits on row R+6 after a render;
-		// \033[6A returns to row R (the prev-sentence line) exactly.
-		fmt.Print("\033[6A")
+		// Move cursor up to the first sentence line. The controls line has no
+		// trailing newline, so the cursor sits at row R+(2*contextLines+4)-1;
+		// moving up by 2*contextLines+4 returns to row R.
+		fmt.Printf("\033[%dA", 2*contextLines+4)
 	}
 
 	termWidth, _, err := term.GetSize(int(os.Stdout.Fd()))
@@ -194,12 +204,9 @@ func (p *Player) renderUI() {
 	// }
 
 	// Reserve 4 chars for the leading `  "` and trailing `"`.
-	maxWidth := termWidth - 4
-	if maxWidth < 10 {
-		maxWidth = 10
-	}
+	maxWidth := max((termWidth - 4), 10)
 
-	prev, curr, next := p.contextSentences(maxWidth)
+	context := p.contextSentences(maxWidth)
 
 	total := len(p.sentences)
 	current := p.index + 1
@@ -229,9 +236,13 @@ func (p *Player) renderUI() {
 		}
 	}
 
-	fmt.Printf("\r\033[K\033[2m  %s\033[0m\r\n", prev)
-	fmt.Printf("\r\033[K  %s\r\n", curr)
-	fmt.Printf("\r\033[K\033[2m  %s\033[0m\r\n", next)
+	for i, line := range context {
+		if i == contextLines {
+			fmt.Printf("\r\033[K  %s\r\n", line)
+		} else {
+			fmt.Printf("\r\033[K\033[2m  %s\033[0m\r\n", line)
+		}
+	}
 	fmt.Printf("\r\033[K\r\n")
 	fmt.Printf("\r\033[K  [%s] %d%% (%d/%d)%s%s\r\n", bar, pct, current, total, timeLabel, pauseLabel)
 	fmt.Printf("\r\033[K\r\n")
@@ -240,17 +251,17 @@ func (p *Player) renderUI() {
 	p.rendered = true
 }
 
-// contextSentences returns the prev, current, and next sentence strings,
-// truncated to maxWidth. Empty strings are returned at the boundaries.
-func (p *Player) contextSentences(maxWidth int) (prev, curr, next string) {
-	if p.index > 0 {
-		prev = truncate(p.sentences[p.index-1], maxWidth)
+// contextSentences returns 2*contextLines+1 sentence strings centred on the
+// current index, truncated to maxWidth. Out-of-bounds entries are empty.
+func (p *Player) contextSentences(maxWidth int) []string {
+	lines := make([]string, 2*contextLines+1)
+	for i := range lines {
+		idx := p.index + i - contextLines
+		if idx >= 0 && idx < len(p.sentences) {
+			lines[i] = truncate(p.sentences[idx], maxWidth)
+		}
 	}
-	curr = truncate(p.sentences[p.index], maxWidth)
-	if p.index < len(p.sentences)-1 {
-		next = truncate(p.sentences[p.index+1], maxWidth)
-	}
-	return
+	return lines
 }
 
 // clearUI moves past the UI block so the shell prompt appears cleanly.
@@ -262,9 +273,10 @@ func (p *Player) clearUI() {
 
 // truncate shortens s to at most n runes, adding "…" if cut.
 func truncate(s string, n int) string {
+	s = strings.ReplaceAll(s, "\n", " ")
 	runes := []rune(s)
 	if len(runes) <= n {
 		return s
 	}
-	return strings.ReplaceAll(string(runes[:n-1])+"…", "\n", " ")
+	return string(runes[:n-1]) + "…"
 }
