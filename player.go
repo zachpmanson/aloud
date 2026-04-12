@@ -58,6 +58,10 @@ func NewPlayer(sentences []string, tty *os.File, wpm int) *Player {
 
 // Run plays sentences sequentially, handling commands from cmdCh.
 func (p *Player) Run() {
+	if c := exec.Command("caffeinate", "-d"); c.Start() == nil {
+		defer c.Process.Kill() //nolint:errcheck
+	}
+
 	for p.index < len(p.sentences) {
 		p.cmd = exec.Command("say", applyPronunciations(p.sentences[p.index])+" [[slnc 400]]")
 		if err := p.cmd.Start(); err != nil {
