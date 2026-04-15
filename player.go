@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"syscall"
 	"time"
 
 	"golang.org/x/term"
@@ -95,12 +94,7 @@ func (p *Player) Run() {
 
 			case <-doneCh:
 				hangTimer.Stop()
-				if !p.paused {
-					p.index++
-				}
-				// If paused, doneCh firing means the process ended somehow;
-				// treat as natural completion.
-				p.paused = false
+				p.index++
 				break outer
 
 			case c := <-p.cmdCh:
@@ -113,23 +107,19 @@ func (p *Player) Run() {
 					return
 
 				case CmdPause:
-					if !p.paused {
-						hangTimer.Stop()
-						p.cmd.Process.Signal(syscall.SIGSTOP) //nolint:errcheck
-						p.paused = true
-					} else {
-						hangTimer.Reset(timeout)
-						p.cmd.Process.Signal(syscall.SIGCONT) //nolint:errcheck
-						p.paused = false
-					}
+					hangTimer.Stop()
+					p.cmd.Process.Kill() //nolint:errcheck
+					<-doneCh
+					p.paused = true
 					p.renderUI()
+					if done := p.waitWhilePaused(); done {
+						p.clearUI()
+						return
+					}
+					break outer
 
 				case CmdNext:
 					hangTimer.Stop()
-					if p.paused {
-						p.cmd.Process.Signal(syscall.SIGCONT) //nolint:errcheck
-						p.paused = false
-					}
 					p.cmd.Process.Kill() //nolint:errcheck
 					<-doneCh
 					if p.index < len(p.sentences)-1 {
@@ -139,10 +129,6 @@ func (p *Player) Run() {
 
 				case CmdPrev:
 					hangTimer.Stop()
-					if p.paused {
-						p.cmd.Process.Signal(syscall.SIGCONT) //nolint:errcheck
-						p.paused = false
-					}
 					p.cmd.Process.Kill() //nolint:errcheck
 					<-doneCh
 					if p.index > 0 {
@@ -154,10 +140,6 @@ func (p *Player) Run() {
 					if c >= CmdSeek {
 						hangTimer.Stop()
 						digit := int(c - CmdSeek) // 0–9
-						if p.paused {
-							p.cmd.Process.Signal(syscall.SIGCONT) //nolint:errcheck
-							p.paused = false
-						}
 						p.cmd.Process.Kill() //nolint:errcheck
 						<-doneCh
 						p.index = digit * len(p.sentences) / 10
@@ -169,6 +151,45 @@ func (p *Player) Run() {
 	}
 
 	p.clearUI()
+}
+
+// waitWhilePaused blocks until the user resumes, seeks, or quits.
+// It updates p.index as needed and clears p.paused before returning.
+// Returns true if the player should quit.
+func (p *Player) waitWhilePaused() bool {
+	for {
+		c := <-p.cmdCh
+		switch c {
+		case CmdQuit:
+			return true
+		case CmdPause:
+			p.paused = false
+			p.renderUI()
+			return false
+		case CmdNext:
+			p.paused = false
+			if p.index < len(p.sentences)-1 {
+				p.index++
+			}
+			p.renderUI()
+			return false
+		case CmdPrev:
+			p.paused = false
+			if p.index > 0 {
+				p.index--
+			}
+			p.renderUI()
+			return false
+		default:
+			if c >= CmdSeek {
+				digit := int(c - CmdSeek)
+				p.paused = false
+				p.index = digit * len(p.sentences) / 10
+				p.renderUI()
+				return false
+			}
+		}
+	}
 }
 
 // keyboardLoop reads raw key input from the tty and sends Commands.

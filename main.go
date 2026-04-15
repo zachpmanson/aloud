@@ -15,6 +15,8 @@ import (
 
 var splitRe = regexp.MustCompile(`[^.][^A-Z][.!?]["'\)]?[\n ]`)
 
+var urlRe = regexp.MustCompile(`https?://(?:www\.)?([a-zA-Z0-9-]+)\.[a-zA-Z]{2,}[^\s]*`)
+
 var asciiNormalizer = strings.NewReplacer(
 	"\u201C", `"`, // left double quotation mark
 	"\u201D", `"`, // right double quotation mark
@@ -39,9 +41,17 @@ var pronunciations = map[string]string{
 	"VRAM":   "vee ram",
 	"RAM":    "ram",
 	"KPI":    "K.P.I.",
+	"SaaS":   "sass",
 }
 
 func applyPronunciations(s string) string {
+	s = urlRe.ReplaceAllStringFunc(s, func(match string) string {
+		sub := urlRe.FindStringSubmatch(match)
+		if len(sub) < 2 {
+			return match
+		}
+		return sub[1] + " URL"
+	})
 	pairs := make([]string, 0, len(pronunciations)*2)
 	for from, to := range pronunciations {
 		pairs = append(pairs, from, to)
@@ -50,6 +60,18 @@ func applyPronunciations(s string) string {
 }
 
 func splitSentences(text string) []string {
+	var result []string
+	for _, para := range strings.Split(text, "\n\n") {
+		para = strings.TrimSpace(para)
+		if para == "" {
+			continue
+		}
+		result = append(result, splitParagraph(para)...)
+	}
+	return result
+}
+
+func splitParagraph(text string) []string {
 	locs := splitRe.FindAllStringIndex(text, -1)
 	if len(locs) == 0 {
 		if s := strings.TrimSpace(text); s != "" {
