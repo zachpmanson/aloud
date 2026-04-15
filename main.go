@@ -6,7 +6,9 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"syscall"
 
@@ -142,6 +144,10 @@ func maybeCrash(err error, msg string) {
 }
 
 func main() {
+	// Lock the main goroutine to the OS main thread so the Cocoa main run loop
+	// (required by MPRemoteCommandCenter) runs on the correct thread.
+	runtime.LockOSThread()
+
 	atPct := getAt()
 	input := normalizeASCII(getText())
 	sentences := splitSentences((input))
@@ -153,15 +159,14 @@ func main() {
 
 	tty, err := os.Open("/dev/tty")
 	maybeCrash(err, "cannot open /dev/tty")
-	defer tty.Close()
 
 	oldState, err := term.MakeRaw(int(tty.Fd()))
 	maybeCrash(err, "cannot set raw terminal")
 
 	restore := func() {
 		term.Restore(int(tty.Fd()), oldState)
+		tty.Close()
 	}
-	defer restore()
 
 	// Restore terminal on external signals.
 	sigCh := make(chan os.Signal, 1)
@@ -172,12 +177,24 @@ func main() {
 		os.Exit(0)
 	}()
 
+	title := "stdin"
+	if flag.NArg() == 1 {
+		base := filepath.Base(flag.Arg(0))
+		title = strings.TrimSuffix(base, filepath.Ext(base))
+	}
+
 	p := NewPlayer(sentences, tty)
 	p.index = *atPct * len(sentences) / 100
-	startMediaKeyMonitor(p.cmdCh)
+	startMediaKeyMonitor(p.cmdCh, title)
 	go p.keyboardLoop()
-	p.Run()
+	go func() {
+		p.Run()
+		fmt.Print("\n")
+		restore()
+		os.Exit(0)
+	}()
 
-	// Move past the UI block cleanly.
-	fmt.Print("\n")
+	// Block the OS main thread on the Cocoa run loop so MPRemoteCommandCenter
+	// can receive media key events. Player runs on a separate goroutine above.
+	runMainLoop()
 }

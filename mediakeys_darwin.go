@@ -3,15 +3,17 @@ package main
 /*
 #cgo CFLAGS: -x objective-c
 #cgo LDFLAGS: -framework Cocoa -framework MediaPlayer
+#include <stdlib.h>
 
-void startMediaKeyMonitor(void);
+void startMediaKeyMonitor(const char *title);
+void setNowPlayingPlaybackState(int playing);
+void RunMainLoop(void);
 */
 import "C"
-import "runtime"
+import "unsafe"
 
 // globalMediaKeyCh is set once by startMediaKeyMonitor and read by the
-// Objective-C callback on its own OS thread, so no synchronisation is needed
-// beyond the happens-before guarantee of the goroutine start.
+// Objective-C callback dispatched on the main queue.
 var globalMediaKeyCh chan Command
 
 //export goMediaKeyCallback
@@ -33,17 +35,33 @@ func goMediaKeyCallback(keyCode C.int) {
 	}
 }
 
-// startMediaKeyMonitor registers a global NSEvent monitor for media keys and
-// forwards matching key-down events to ch as Commands.
-// It must be called before Player.Run().
-//
-// NOTE: macOS requires "Input Monitoring" access (System Settings →
-// Privacy & Security → Input Monitoring) for global monitors to receive
-// events from other applications.
-func startMediaKeyMonitor(ch chan Command) {
+// UpdateNowPlayingState tells macOS whether this process is actively playing,
+// which causes macOS to route media-key events here instead of Apple Music.
+// Safe to call from any goroutine; dispatches to the main queue internally.
+func UpdateNowPlayingState(playing bool) {
+	v := C.int(0)
+	if playing {
+		v = 1
+	}
+	C.setNowPlayingPlaybackState(v)
+}
+
+// startMediaKeyMonitor schedules MPRemoteCommandCenter registration on the
+// Cocoa main queue and forwards matching events to ch as Commands.
+// Must be called before RunMainLoop().
+func startMediaKeyMonitor(ch chan Command, title string) {
 	globalMediaKeyCh = ch
-	go func() {
-		runtime.LockOSThread() // NSRunLoop must stay on one OS thread
-		C.startMediaKeyMonitor()
-	}()
+	cs := C.CString(title)
+	// cs is passed to ObjC which copies it into an NSString, so we can free
+	// immediately after the call returns (dispatch_async has already captured it).
+	// Actually, the block captures titleStr (NSString), not cs, so free is safe.
+	C.startMediaKeyMonitor(cs)
+	C.free(unsafe.Pointer(cs))
+}
+
+// runMainLoop runs the Cocoa main run loop on the current OS thread forever.
+// The caller must have locked its goroutine to the OS main thread via
+// runtime.LockOSThread() before calling this.
+func runMainLoop() {
+	C.RunMainLoop()
 }

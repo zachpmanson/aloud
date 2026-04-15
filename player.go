@@ -71,6 +71,7 @@ func (p *Player) Run() {
 			p.index++
 			continue
 		}
+		UpdateNowPlayingState(true)
 		p.renderUI()
 
 		doneCh := make(chan struct{})
@@ -111,6 +112,7 @@ func (p *Player) Run() {
 					p.cmd.Process.Kill() //nolint:errcheck
 					<-doneCh
 					p.paused = true
+					UpdateNowPlayingState(false)
 					p.renderUI()
 					if done := p.waitWhilePaused(); done {
 						p.clearUI()
@@ -150,6 +152,7 @@ func (p *Player) Run() {
 		}
 	}
 
+	UpdateNowPlayingState(false)
 	p.clearUI()
 }
 
@@ -164,10 +167,12 @@ func (p *Player) waitWhilePaused() bool {
 			return true
 		case CmdPause:
 			p.paused = false
+			UpdateNowPlayingState(true)
 			p.renderUI()
 			return false
 		case CmdNext:
 			p.paused = false
+			UpdateNowPlayingState(true)
 			if p.index < len(p.sentences)-1 {
 				p.index++
 			}
@@ -175,6 +180,7 @@ func (p *Player) waitWhilePaused() bool {
 			return false
 		case CmdPrev:
 			p.paused = false
+			UpdateNowPlayingState(true)
 			if p.index > 0 {
 				p.index--
 			}
@@ -184,6 +190,7 @@ func (p *Player) waitWhilePaused() bool {
 			if c >= CmdSeek {
 				digit := int(c - CmdSeek)
 				p.paused = false
+				UpdateNowPlayingState(true)
 				p.index = digit * len(p.sentences) / 10
 				p.renderUI()
 				return false
