@@ -26,7 +26,7 @@ const (
 
 // Player manages TTS playback and terminal UI.
 type Player struct {
-	sentences  []string
+	sentences  []Sentence
 	wordCounts []int
 	totalWords int
 	index      int
@@ -39,11 +39,11 @@ type Player struct {
 
 var WPM int = 160
 
-func NewPlayer(sentences []string, tty *os.File) *Player {
+func NewPlayer(sentences []Sentence, tty *os.File) *Player {
 	wordCounts := make([]int, len(sentences))
 	total := 0
 	for i, s := range sentences {
-		n := len(strings.Fields(s))
+		n := len(strings.Fields(s.Text))
 		wordCounts[i] = n
 		total += n
 	}
@@ -63,9 +63,10 @@ func (p *Player) Run() {
 	}
 
 	for p.index < len(p.sentences) {
+		s := p.sentences[p.index]
 		p.cmd = exec.Command("say", "-r",
 			fmt.Sprintf("%d", WPM),
-			applyPronunciations(p.sentences[p.index])+" [[slnc 400]]")
+			applyPronunciations(s.Text)+fmt.Sprintf(" [[slnc %d]]", s.Pause))
 		if err := p.cmd.Start(); err != nil {
 			// If say fails, skip to next sentence.
 			p.index++
@@ -306,7 +307,7 @@ func (p *Player) contextSentences(maxWidth int) []string {
 	for i := range lines {
 		idx := p.index + i - contextLines
 		if idx >= 0 && idx < len(p.sentences) {
-			lines[i] = truncate(p.sentences[idx], maxWidth)
+			lines[i] = truncate(p.sentences[idx].Text, maxWidth)
 		}
 	}
 	return lines

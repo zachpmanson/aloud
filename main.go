@@ -80,19 +80,49 @@ func applyPronunciations(s string) string {
 	return strings.NewReplacer(pairs...).Replace(s)
 }
 
-func splitSentences(text string) []string {
-	var result []string
+const (
+	pauseSentence  = 400
+	pauseLine      = 700
+	pauseParagraph = 1200
+)
+
+type Sentence struct {
+	Text  string
+	Pause int // ms of silence after this sentence
+}
+
+func splitSentences(text string) []Sentence {
+	var result []Sentence
 	for _, para := range strings.Split(text, "\n\n") {
 		para = strings.TrimSpace(para)
 		if para == "" {
 			continue
 		}
-		result = append(result, splitParagraph(para)...)
+		lines := strings.Split(para, "\n")
+		for li, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			strs := splitLine(line)
+			isLastLine := li == len(lines)-1
+			for si, s := range strs {
+				pause := pauseSentence
+				if si == len(strs)-1 {
+					if isLastLine {
+						pause = pauseParagraph
+					} else {
+						pause = pauseLine
+					}
+				}
+				result = append(result, Sentence{Text: s, Pause: pause})
+			}
+		}
 	}
 	return result
 }
 
-func splitParagraph(text string) []string {
+func splitLine(text string) []string {
 	locs := splitRe.FindAllStringIndex(text, -1)
 	if len(locs) == 0 {
 		if s := strings.TrimSpace(text); s != "" {
