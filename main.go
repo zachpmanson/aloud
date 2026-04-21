@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"io"
@@ -35,15 +36,33 @@ func normalizeASCII(s string) string { return asciiNormalizer.Replace(s) }
 // pronunciations maps words/phrases that `say` mispronounces to better
 // alternatives. Replacements are applied to the spoken text only; the
 // original text is still shown in the progress bar.
-var pronunciations = map[string]string{
-	// Add entries here, e.g.:
-	"\n":     "[[slnc 3500]]",
-	"OpenAI": "Open A.I.",
-	"AGI":    "A.G.I.",
-	"VRAM":   "vee ram",
-	"RAM":    "ram",
-	"KPI":    "K.P.I.",
-	"SaaS":   "sass",
+var pronunciations = loadPronunciations()
+
+func loadPronunciations() map[string]string {
+	exe, err := os.Executable()
+	if err != nil {
+		return map[string]string{}
+	}
+	f, err := os.Open(filepath.Join(filepath.Dir(exe), "pronunciations.txt"))
+	if err != nil {
+		return map[string]string{}
+	}
+	defer f.Close()
+	m := map[string]string{}
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key := strings.ReplaceAll(k, `\n`, "\n")
+		m[key] = v
+	}
+	return m
 }
 
 func applyPronunciations(s string) string {

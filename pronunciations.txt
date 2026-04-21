@@ -1,0 +1,13 @@
+# pronunciations.txt
+# Maps words/phrases that `say` mispronounces to better alternatives.
+# Format: word=pronunciation
+# Use \n as the key to represent a newline character.
+
+\n=[[slnc 3500]]
+OpenAI=Open A.I.
+AGI=A.G.I.
+VRAM=vee ram
+RAM=ram
+KPI=K.P.I.
+SaaS=sass
+ecosystem=eecosystem
