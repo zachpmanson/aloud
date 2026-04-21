@@ -11,3 +11,6 @@ RAM=ram
 KPI=K.P.I.
 SaaS=sass
 ecosystem=eecosystem
+privatize=privatise
+privatized=privatised
+JNR=J.N.R.
