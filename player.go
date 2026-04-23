@@ -39,11 +39,21 @@ type Player struct {
 
 var WPM int = 160
 
+func countDigits(s string) int {
+	n := 0
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			n++
+		}
+	}
+	return n
+}
+
 func NewPlayer(sentences []Sentence, tty *os.File) *Player {
 	wordCounts := make([]int, len(sentences))
 	total := 0
 	for i, s := range sentences {
-		n := len(strings.Fields(s.Text))
+		n := len(strings.Fields(s.Text)) + countDigits(s.Text)
 		wordCounts[i] = n
 		total += n
 	}
