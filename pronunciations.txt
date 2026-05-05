@@ -16,3 +16,5 @@ privatized=privatised
 JNR=J.N.R.
 Palantir=Palanteer
 AI=A.I.
+k8s=kuberneteez
+Kubernetes=kuberneteez

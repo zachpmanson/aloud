@@ -36,14 +36,23 @@ func normalizeASCII(s string) string { return asciiNormalizer.Replace(s) }
 // pronunciations maps words/phrases that `say` mispronounces to better
 // alternatives. Replacements are applied to the spoken text only; the
 // original text is still shown in the progress bar.
-var pronunciations = loadPronunciations()
+var pronunciations map[string]string
+var pronunciationsPath string
 
-func loadPronunciations() map[string]string {
-	exe, err := os.Executable()
-	if err != nil {
-		return map[string]string{}
+func loadPronunciations(path string) map[string]string {
+	if path == "" {
+		// Try current directory first
+		if _, err := os.Stat("pronunciations.txt"); err == nil {
+			path = "pronunciations.txt"
+		} else {
+			exe, err := os.Executable()
+			if err != nil {
+				return map[string]string{}
+			}
+			path = filepath.Join(filepath.Dir(exe), "pronunciations.txt")
+		}
 	}
-	f, err := os.Open(filepath.Join(filepath.Dir(exe), "pronunciations.txt"))
+	f, err := os.Open(path)
 	if err != nil {
 		return map[string]string{}
 	}
@@ -148,16 +157,15 @@ func splitLine(text string) []string {
 func getAt() *int {
 	atPct := flag.Int("at", 0, "start playback at `percent` (0-100)")
 	flag.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: aloud [--at <percent>] <file>\n       echo \"text\" | aloud [--at <percent>]")
+		fmt.Fprintln(os.Stderr, "Usage: aloud [--at <percent>] [--pronunciations <file>] <file>\n       echo \"text\" | aloud [--at <percent>] [--pronunciations <file>]")
 	}
-	flag.Parse()
+	// flag.Parse() is now called in main
 
 	if *atPct < 0 || *atPct > 100 {
 		fmt.Fprintln(os.Stderr, "aloud: --at must be between 0 and 100")
 		os.Exit(1)
 	}
 	return atPct
-
 }
 
 func getText() string {
@@ -197,7 +205,19 @@ func main() {
 	// (required by MPRemoteCommandCenter) runs on the correct thread.
 	runtime.LockOSThread()
 
-	atPct := getAt()
+	flag.StringVar(&pronunciationsPath, "pronunciations", "", "path to pronunciations file")
+	atPct := flag.Int("at", 0, "start playback at `percent` (0-100)")
+	flag.Usage = func() {
+		fmt.Fprintln(os.Stderr, "Usage: aloud [--at <percent>] [--pronunciations <file>] <file>\n       echo \"text\" | aloud [--at <percent>] [--pronunciations <file>]")
+	}
+	flag.Parse()
+
+	if *atPct < 0 || *atPct > 100 {
+		fmt.Fprintln(os.Stderr, "aloud: --at must be between 0 and 100")
+		os.Exit(1)
+	}
+
+	pronunciations = loadPronunciations(pronunciationsPath)
 	input := normalizeASCII(getText())
 	sentences := splitSentences((input))
 
