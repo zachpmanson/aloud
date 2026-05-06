@@ -18,3 +18,6 @@ Palantir=Palanteer
 AI=A.I.
 k8s=kuberneteez
 Kubernetes=kuberneteez
+UAE=U.A.E.
+OPEC=Oh Peck
+xAI=X.A.I.

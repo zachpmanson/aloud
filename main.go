@@ -12,7 +12,12 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+	"net/http"
+	"time"
+	"golang.org/x/net/html"
 
+	readability "github.com/philipjkim/goreadability"
+	"github.com/PuerkitoBio/goquery"
 	"golang.org/x/term"
 )
 
@@ -206,6 +211,7 @@ func main() {
 	runtime.LockOSThread()
 
 	flag.StringVar(&pronunciationsPath, "pronunciations", "", "path to pronunciations file")
+	urlFlag := flag.String("url", "", "URL to fetch text from (plain text or HTML)")
 	atPct := flag.Int("at", 0, "start playback at `percent` (0-100)")
 	flag.Usage = func() {
 		fmt.Fprintln(os.Stderr, "Usage: aloud [--at <percent>] [--pronunciations <file>] <file>\n       echo \"text\" | aloud [--at <percent>] [--pronunciations <file>]")
@@ -218,7 +224,121 @@ func main() {
 	}
 
 	pronunciations = loadPronunciations(pronunciationsPath)
-	input := normalizeASCII(getText())
+
+	// Only one input source allowed: file, stdin, or URL
+	fileArg := flag.NArg() == 1
+	stdinArg := !term.IsTerminal(int(os.Stdin.Fd()))
+	urlArg := *urlFlag != ""
+	inputSources := 0
+	if fileArg { inputSources++ }
+	if stdinArg { inputSources++ }
+	if urlArg { inputSources++ }
+	if inputSources > 1 {
+		fmt.Fprintln(os.Stderr, "aloud: only one input source allowed (file, stdin, or --url)")
+		os.Exit(1)
+	}
+
+	var input string
+	if urlArg {
+		client := &http.Client{Timeout: 15 * time.Second}
+		resp, err := client.Get(*urlFlag)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "aloud: failed to fetch URL: %v\n", err)
+			os.Exit(1)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			fmt.Fprintf(os.Stderr, "aloud: failed to fetch URL: HTTP %d\n", resp.StatusCode)
+			os.Exit(1)
+		}
+	
+		opt := readability.NewOption()
+		htmlBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "aloud: failed to read response body: %v\n", err)
+			os.Exit(1)
+		}
+		doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(htmlBody)))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "aloud: failed to parse HTML: %v\n", err)
+			os.Exit(1)
+		}
+		article, err := readability.ExtractFromDocument(doc, *urlFlag, opt)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "aloud: failed to extract main content: %v\n", err)
+			input = string(htmlBody)
+		} else if article.Description == "" {
+			fmt.Fprintf(os.Stderr, "aloud: no readable content found at URL\n")
+			input = string(htmlBody)
+		} else {
+			// Combine title and description for richer output
+			input = strings.TrimSpace(article.Title + "\n\n" + article.Description)
+		}
+	} else if fileArg {
+		data, err := os.ReadFile(flag.Arg(0))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "aloud: cannot read file: %v\n", err)
+			os.Exit(1)
+		}
+		// Try to extract readable content from file if it's HTML
+		if strings.HasSuffix(strings.ToLower(flag.Arg(0)), ".html") || strings.HasPrefix(strings.TrimSpace(string(data)), "<") {
+			// Try parsing as a full HTML document, fallback to fragment if needed
+			doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(data)))
+			if err != nil {
+				// Try parsing as HTML fragment using goquery.NewDocumentFromNode
+				node, err2 := html.Parse(strings.NewReader(string(data)))
+				if err2 == nil {
+					// Find <html> or <body> node for goquery
+					var docNode *html.Node
+					var findNode func(*html.Node)
+					findNode = func(n *html.Node) {
+						if n.Type == html.ElementNode && (n.Data == "html" || n.Data == "body") {
+							docNode = n
+						}
+						for c := n.FirstChild; c != nil && docNode == nil; c = c.NextSibling {
+							findNode(c)
+						}
+					}
+					findNode(node)
+					if docNode != nil {
+						doc = goquery.NewDocumentFromNode(docNode)
+					}
+				}
+			}
+
+			if doc != nil {
+				opt := readability.NewOption()
+				article, err := readability.ExtractFromDocument(doc, flag.Arg(0), opt)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "aloud: failed to extract main content: %v\n", err)
+					input = string(data)
+				} else if article.Description != "" {
+					// Combine title and description for richer output
+					input = strings.TrimSpace(article.Title + "\n\n" + article.Description)
+				} else {
+					input = string(data)
+				}
+			} else {
+				fmt.Fprintf(os.Stderr, "aloud: goquery returned nil document\n")
+				input = string(data)
+			}
+		} else {
+			input = string(data)
+		}
+	} else if stdinArg {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "aloud: cannot read stdin: %v\n", err)
+			os.Exit(1)
+		}
+		input = string(data)
+	} else {
+		flag.Usage()
+		os.Exit(1)
+	}
+	input = normalizeASCII(input)
+
+
 	sentences := splitSentences((input))
 
 	if len(sentences) == 0 {
