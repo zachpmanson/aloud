@@ -12,11 +12,12 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
-	"net/http"
+	"net/url"
+
 	"time"
 	"golang.org/x/net/html"
 
-	readability "github.com/philipjkim/goreadability"
+	readability "codeberg.org/readeck/go-readability/v2"
 	"github.com/PuerkitoBio/goquery"
 	"golang.org/x/term"
 )
@@ -205,6 +206,25 @@ func maybeCrash(err error, msg string) {
 	}
 }
 
+func sanitizeFilename(title string) string {
+	// Allow only alphanumeric, space, dot, underscore, and dash; limit to 255 chars
+	title = strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == ' ' || r == '.' || r == '_' || r == '-' {
+			return r
+		}
+		return -1
+	}, title)
+	title = strings.TrimSpace(title)
+	if len(title) > 255 {
+		title = title[:255]
+	}
+	if title == "" {
+		title = "article"
+	}
+	return title
+}
+
+
 func main() {
 	// Lock the main goroutine to the OS main thread so the Cocoa main run loop
 	// (required by MPRemoteCommandCenter) runs on the correct thread.
@@ -212,9 +232,10 @@ func main() {
 
 	flag.StringVar(&pronunciationsPath, "pronunciations", "", "path to pronunciations file")
 	urlFlag := flag.String("url", "", "URL to fetch text from (plain text or HTML)")
+	outputFlag := flag.String("output", "", "Write article text to file or directory (uses article title as filename if directory)")
 	atPct := flag.Int("at", 0, "start playback at `percent` (0-100)")
 	flag.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: aloud [--at <percent>] [--pronunciations <file>] <file>\n       echo \"text\" | aloud [--at <percent>] [--pronunciations <file>]")
+		fmt.Fprintln(os.Stderr, "Usage: aloud [--at <percent>] [--pronunciations <file>] [--output <file|dir>] <file>\n       echo \"text\" | aloud [--at <percent>] [--pronunciations <file>] [--output <file|dir>]")
 	}
 	flag.Parse()
 
@@ -239,48 +260,29 @@ func main() {
 	}
 
 	var input string
+	var articleTitle string
 	if urlArg {
-		client := &http.Client{Timeout: 15 * time.Second}
-		resp, err := client.Get(*urlFlag)
+		article, err := readability.FromURL(*urlFlag, 15*time.Second)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "aloud: failed to fetch URL: %v\n", err)
+			fmt.Fprintf(os.Stderr, "aloud: failed to extract article: %v\n", err)
 			os.Exit(1)
 		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			fmt.Fprintf(os.Stderr, "aloud: failed to fetch URL: HTTP %d\n", resp.StatusCode)
+		articleTitle = article.Title()
+		var sb strings.Builder
+		sb.WriteString(articleTitle)
+		sb.WriteString("\n\n")
+		err = article.RenderText(&sb)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "aloud: failed to render article text: %v\n", err)
 			os.Exit(1)
 		}
-	
-		opt := readability.NewOption()
-		htmlBody, err := io.ReadAll(resp.Body)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "aloud: failed to read response body: %v\n", err)
-			os.Exit(1)
-		}
-		doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(htmlBody)))
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "aloud: failed to parse HTML: %v\n", err)
-			os.Exit(1)
-		}
-		article, err := readability.ExtractFromDocument(doc, *urlFlag, opt)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "aloud: failed to extract main content: %v\n", err)
-			input = string(htmlBody)
-		} else if article.Description == "" {
-			fmt.Fprintf(os.Stderr, "aloud: no readable content found at URL\n")
-			input = string(htmlBody)
-		} else {
-			// Combine title and description for richer output
-			input = strings.TrimSpace(article.Title + "\n\n" + article.Description)
-		}
+		input = strings.TrimSpace(sb.String())
 	} else if fileArg {
 		data, err := os.ReadFile(flag.Arg(0))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "aloud: cannot read file: %v\n", err)
 			os.Exit(1)
 		}
-		// Try to extract readable content from file if it's HTML
 		if strings.HasSuffix(strings.ToLower(flag.Arg(0)), ".html") || strings.HasPrefix(strings.TrimSpace(string(data)), "<") {
 			// Try parsing as a full HTML document, fallback to fragment if needed
 			doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(data)))
@@ -307,17 +309,24 @@ func main() {
 			}
 
 			if doc != nil {
-				opt := readability.NewOption()
-				article, err := readability.ExtractFromDocument(doc, flag.Arg(0), opt)
+				absPath, _ := filepath.Abs(flag.Arg(0))
+				baseURL, _ := url.Parse("file://" + absPath)
+				article, err := readability.FromReader(strings.NewReader(string(data)), baseURL)
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "aloud: failed to extract main content: %v\n", err)
-					input = string(data)
-				} else if article.Description != "" {
-					// Combine title and description for richer output
-					input = strings.TrimSpace(article.Title + "\n\n" + article.Description)
-				} else {
-					input = string(data)
+					fmt.Fprintf(os.Stderr, "aloud: failed to extract article: %v\n", err)
+					os.Exit(1)
 				}
+				articleTitle = article.Title()
+				var sb strings.Builder
+				sb.WriteString(articleTitle)
+				sb.WriteString("\n\n")
+				err = article.RenderText(&sb)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "aloud: failed to render article text: %v\n", err)
+					os.Exit(1)
+				}
+				input = strings.TrimSpace(sb.String())
+			
 			} else {
 				fmt.Fprintf(os.Stderr, "aloud: goquery returned nil document\n")
 				input = string(data)
@@ -337,6 +346,28 @@ func main() {
 		os.Exit(1)
 	}
 	input = normalizeASCII(input)
+
+	// Handle --output flag: write article text to file or directory
+	if *outputFlag != "" {
+		outputPath := *outputFlag
+		info, err := os.Stat(outputPath)
+		if err == nil && info.IsDir() {
+			// Directory: use sanitized article title as filename
+			filename := sanitizeFilename(articleTitle)
+			outputPath = filepath.Join(outputPath, filename+".md")
+		} else if os.IsNotExist(err) && strings.HasSuffix(outputPath, string(os.PathSeparator)) {
+			// Directory does not exist, create it
+			os.MkdirAll(outputPath, 0755)
+			filename := sanitizeFilename(articleTitle)
+			outputPath = filepath.Join(outputPath, filename+".md")
+		}
+		if err := os.WriteFile(outputPath, []byte(input), 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "aloud: failed to write output: %v\n", err)
+		} else {
+			fmt.Fprintf(os.Stderr, "aloud: wrote article to %s\n", outputPath)
+		}
+	}
+
 
 
 	sentences := splitSentences((input))
