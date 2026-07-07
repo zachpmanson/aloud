@@ -11,9 +11,10 @@ buildGoModule {
   env.CGO_ENABLED = "1";
   buildInputs = lib.optionals (apple-sdk != null) [ apple-sdk ];
 
-  # vendorHash can't be known before the first build. Leave lib.fakeHash, run
-  # `nix build .#aloud`, and paste the "got: sha256-..." value it prints.
-  vendorHash = "sha256-Tne/JjcvGLeokGkMPmdxeRRmIyriFHaWab2JGfIzpkI=";
+  # go.mod/go.sum picked up new deps (goquery/readability) after this hash was
+  # set, so it's stale. Run `nix build .#aloud`, and paste the
+  # "got: sha256-..." value it prints.
+  vendorHash = lib.fakeHash;
 
   meta = {
     description = "Text-to-speech reader / player with media-key control";
