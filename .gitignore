@@ -1,3 +1,5 @@
 aloud
 .claude
 .DS_Store
+# direnv
+.direnv/
